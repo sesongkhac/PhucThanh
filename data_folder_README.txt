@@ -1,0 +1,1 @@
+Thư mục này dùng để chứa các tài liệu .pdf, .docx, .txt mà người dùng tải lên qua giao diện web.
