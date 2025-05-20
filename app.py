@@ -5,7 +5,9 @@ import pdfplumber
 import docx
 import requests
 
-# Lấy API key từ biến môi trường (phù hợp với Render)
+DATA_DIR = "data"
+os.makedirs(DATA_DIR, exist_ok=True)
+
 API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 MODEL = "mistralai/mistral-7b-instruct"
 API_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -16,21 +18,22 @@ HEADERS = {
 
 st.set_page_config(page_title="Chatbot PCCC", layout="wide")
 
-def extract_text(file):
+def extract_text(file_path):
     text = ""
-    if file.name.endswith(".txt"):
-        text = file.read().decode("utf-8")
-    elif file.name.endswith(".docx"):
-        doc = docx.Document(file)
+    if file_path.endswith(".txt"):
+        with open(file_path, "r", encoding="utf-8") as f:
+            text = f.read()
+    elif file_path.endswith(".docx"):
+        doc = docx.Document(file_path)
         text = "\n".join([para.text for para in doc.paragraphs])
-    elif file.name.endswith(".pdf"):
-        with pdfplumber.open(file) as pdf:
+    elif file_path.endswith(".pdf"):
+        with pdfplumber.open(file_path) as pdf:
             for page in pdf.pages:
                 text += page.extract_text() + "\n"
     return text
 
 def ask_openrouter(context, question):
-    prompt = f"Nội dung tài liệu:\n{context}\n\nCâu hỏi: {question}\nTrả lời:"
+    prompt = f"{context}\n\nCâu hỏi: {question}\nTrả lời:"
     payload = {
         "model": MODEL,
         "messages": [
@@ -44,18 +47,27 @@ def ask_openrouter(context, question):
     else:
         return f"Lỗi {response.status_code}: {response.text}"
 
-st.title("💬 Chatbot PCCC (OpenRouter)")
-st.markdown("Tải tài liệu 📄 (.txt, .docx, .pdf) và đặt câu hỏi")
+st.title("💬 Chatbot PCCC (ghi nhớ tài liệu)")
+st.markdown("Tải tài liệu 📄 (.txt, .docx, .pdf) hoặc đặt câu hỏi trực tiếp")
 
-uploaded_file = st.file_uploader("Tải tài liệu", type=["txt", "docx", "pdf"])
+# Giao diện upload
+uploaded_file = st.file_uploader("Tải tài liệu (tùy chọn)", type=["txt", "docx", "pdf"])
+if uploaded_file:
+    saved_path = os.path.join(DATA_DIR, uploaded_file.name)
+    with open(saved_path, "wb") as f:
+        f.write(uploaded_file.getbuffer())
+    st.success(f"✅ Đã lưu tài liệu: {uploaded_file.name}")
+
+# Tổng hợp nội dung từ tất cả các file đã lưu
+context = ""
+for filename in os.listdir(DATA_DIR):
+    file_path = os.path.join(DATA_DIR, filename)
+    context += extract_text(file_path) + "\n"
+
+# Giao diện câu hỏi
 question = st.text_input("Nhập câu hỏi:")
-
-if uploaded_file and question:
-    content = extract_text(uploaded_file)
-    if content:
-        with st.spinner("Đang tạo phản hồi..."):
-            answer = ask_openrouter(content, question)
-        st.success("🟢 Trả lời:")
-        st.write(answer)
-    else:
-        st.warning("Không đọc được nội dung từ tài liệu.")
+if question:
+    with st.spinner("🔎 Đang trả lời..."):
+        answer = ask_openrouter(context, question)
+    st.success("🟢 Trả lời:")
+    st.write(answer)
