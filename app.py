@@ -9,7 +9,7 @@ import requests
 port = int(os.environ.get("PORT", 8501))
 st.set_page_config(page_title="Chatbot PCCC", layout="wide")
 
-API_KEY = st.secrets["OPENROUTER_API_KEY"]
+API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 MODEL = "mistralai/mistral-7b-instruct"
 API_URL = "https://openrouter.ai/api/v1/chat/completions"
 HEADERS = {
