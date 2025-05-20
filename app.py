@@ -5,10 +5,7 @@ import pdfplumber
 import docx
 import requests
 
-# Render tự cung cấp PORT qua biến môi trường
-port = int(os.environ.get("PORT", 8501))
-st.set_page_config(page_title="Chatbot PCCC", layout="wide")
-
+# Lấy API key từ biến môi trường (phù hợp với Render)
 API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 MODEL = "mistralai/mistral-7b-instruct"
 API_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -16,6 +13,8 @@ HEADERS = {
     "Authorization": f"Bearer {API_KEY}",
     "Content-Type": "application/json"
 }
+
+st.set_page_config(page_title="Chatbot PCCC", layout="wide")
 
 def extract_text(file):
     text = ""
