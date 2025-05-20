@@ -1,0 +1,11 @@
+
+services:
+  - type: web
+    name: chatbot-openrouter
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: streamlit run app.py --server.enableCORS=false
+    plan: free
+    envVars:
+      - key: OPENROUTER_API_KEY
+        sync: false
