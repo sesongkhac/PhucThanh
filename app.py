@@ -5,6 +5,15 @@ import pdfplumber
 import docx
 import requests
 
+import json
+
+# Đọc JSON từ biến môi trường
+service_json = os.environ.get("GDRIVE_SERVICE_ACCOUNT_JSON")
+creds_dict = json.loads(service_json)
+creds = service_account.Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+service = build("drive", "v3", credentials=creds)
+
+
 DATA_DIR = "data"
 os.makedirs(DATA_DIR, exist_ok=True)
 
