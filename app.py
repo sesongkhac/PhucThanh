@@ -1,86 +1,107 @@
 
 import os
+import requests
+import base64
 import streamlit as st
 import pdfplumber
 import docx
-import requests
+from datetime import datetime
+from io import BytesIO
 
-import json
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-
-SCOPES = ['https://www.googleapis.com/auth/drive.file']
-
-# Đọc JSON từ biến môi trường
-service_json = os.environ.get("GDRIVE_SERVICE_ACCOUNT_JSON")
-creds_dict = json.loads(service_json)
-creds = service_account.Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
-drive_service = build("drive", "v3", credentials=creds)
-
-
-DATA_DIR = "data"
-os.makedirs(DATA_DIR, exist_ok=True)
-
+# GitHub + OpenRouter cấu hình
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
+GITHUB_USERNAME = os.environ.get("GITHUB_USERNAME")
+GITHUB_REPO = os.environ.get("GITHUB_REPO")
+UPLOAD_PATH = "uploads"
 API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 MODEL = "mistralai/mistral-7b-instruct"
 API_URL = "https://openrouter.ai/api/v1/chat/completions"
-HEADERS = {
-    "Authorization": f"Bearer {API_KEY}",
-    "Content-Type": "application/json"
-}
+HEADERS = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
 
-st.set_page_config(page_title="Chatbot PCCC", layout="wide")
+# === GitHub tương tác ===
+def upload_file_to_github(file_data, filename):
+    url = f"https://api.github.com/repos/{GITHUB_USERNAME}/{GITHUB_REPO}/contents/{UPLOAD_PATH}/{filename}"
+    encoded = base64.b64encode(file_data).decode("utf-8")
+    payload = {"message": f"Add {filename}", "content": encoded}
+    headers = {"Authorization": f"token {GITHUB_TOKEN}"}
+    r = requests.put(url, json=payload, headers=headers)
+    return r.status_code in [200, 201]
 
-def extract_text(file_path):
-    text = ""
-    if file_path.endswith(".txt"):
-        with open(file_path, "r", encoding="utf-8") as f:
-            text = f.read()
-    elif file_path.endswith(".docx"):
-        doc = docx.Document(file_path)
-        text = "\n".join([para.text for para in doc.paragraphs])
-    elif file_path.endswith(".pdf"):
-        with pdfplumber.open(file_path) as pdf:
-            for page in pdf.pages:
-                text += page.extract_text() + "\n"
-    return text
+def list_files_in_repo():
+    url = f"https://api.github.com/repos/{GITHUB_USERNAME}/{GITHUB_REPO}/contents/{UPLOAD_PATH}"
+    headers = {"Authorization": f"token {GITHUB_TOKEN}"}
+    r = requests.get(url, headers=headers)
+    return r.json() if r.status_code == 200 else []
+
+def fetch_raw_file_text(file_url):
+    r = requests.get(file_url)
+    return r.content if r.status_code == 200 else b""
+
+# === Xử lý văn bản ===
+def extract_text_bytes(file_bytes, filename):
+    if filename.endswith(".txt"):
+        return file_bytes.decode("utf-8")
+    elif filename.endswith(".docx"):
+        doc = docx.Document(BytesIO(file_bytes))
+        return "\n".join(para.text for para in doc.paragraphs)
+    elif filename.endswith(".pdf"):
+        with pdfplumber.open(BytesIO(file_bytes)) as pdf:
+            return "\n".join(p.extract_text() for p in pdf.pages if p.extract_text())
+    return ""
 
 def ask_openrouter(context, question):
     prompt = f"{context}\n\nCâu hỏi: {question}\nTrả lời:"
     payload = {
         "model": MODEL,
         "messages": [
-            {"role": "system", "content": "Bạn là trợ lý AI trả lời bằng tiếng Việt, chính xác, rõ ràng."},
+            {"role": "system", "content": "Bạn là trợ lý AI tiếng Việt, trả lời chính xác, thân thiện."},
             {"role": "user", "content": prompt}
         ]
     }
-    response = requests.post(API_URL, headers=HEADERS, json=payload)
-    if response.status_code == 200:
-        return response.json()["choices"][0]["message"]["content"].strip()
-    else:
-        return f"Lỗi {response.status_code}: {response.text}"
+    r = requests.post(API_URL, headers=HEADERS, json=payload)
+    return r.json()["choices"][0]["message"]["content"].strip() if r.status_code == 200 else f"Lỗi {r.status_code}: {r.text}"
 
-st.title("💬 Chatbot PCCC (ghi nhớ tài liệu)")
-st.markdown("Tải tài liệu 📄 (.txt, .docx, .pdf) hoặc đặt câu hỏi trực tiếp")
+# === UI Streamlit ===
+st.set_page_config(page_title="Chatbot PCCC", layout="wide")
+st.title("🧠 Chatbot PCCC - Phong cách Chat như Zalo")
 
-# Giao diện upload
-uploaded_file = st.file_uploader("Tải tài liệu (tùy chọn)", type=["txt", "docx", "pdf"])
-if uploaded_file:
-    saved_path = os.path.join(DATA_DIR, uploaded_file.name)
-    with open(saved_path, "wb") as f:
-        f.write(uploaded_file.getbuffer())
-    st.success(f"✅ Đã lưu tài liệu: {uploaded_file.name}")
+# Tải file
+with st.expander("📤 Tải tài liệu"):
+    uploaded = st.file_uploader("Chọn tài liệu (.txt, .docx, .pdf)", type=["txt", "docx", "pdf"])
+    if uploaded:
+        fname = f"{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}_{uploaded.name}"
+        if upload_file_to_github(uploaded.getvalue(), fname):
+            st.success(f"✅ Đã lưu vào GitHub: {fname}")
 
-# Tổng hợp nội dung từ tất cả các file đã lưu
+# Nạp nội dung các file làm context
 context = ""
-for filename in os.listdir(DATA_DIR):
-    file_path = os.path.join(DATA_DIR, filename)
-    context += extract_text(file_path) + "\n"
+files = list_files_in_repo()
+for f in files:
+    if f["name"].endswith((".txt", ".docx", ".pdf")):
+        raw = fetch_raw_file_text(f["download_url"])
+        context += extract_text_bytes(raw, f["name"]) + "\n"
 
-# Giao diện câu hỏi
-question = st.text_input("Nhập câu hỏi:")
-if question:
-    with st.spinner("🔎 Đang trả lời..."):
-        answer = ask_openrouter(context, question)
-    st.success("🟢 Trả lời:")
-    st.write(answer)
+# Giao diện Chat
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+
+st.markdown("### 💬 Đối thoại cùng chatbot")
+
+for msg in st.session_state.chat_history:
+    with st.chat_message("user"):
+        st.markdown(msg["user"])
+    with st.chat_message("ai"):
+        st.markdown(msg["bot"])
+
+prompt = st.chat_input("Nhập câu hỏi tại đây...")
+if prompt:
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    with st.spinner("🤖 Đang suy nghĩ..."):
+        response = ask_openrouter(context, prompt)
+
+    with st.chat_message("ai"):
+        st.markdown(response)
+
+    st.session_state.chat_history.append({"user": prompt, "bot": response})
